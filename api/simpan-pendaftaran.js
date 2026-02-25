@@ -1,7 +1,5 @@
-// ============================================================
 // api/simpan-pendaftaran.js
 // Vercel Serverless Function — Simpan pendaftaran siswa ke Supabase
-// ============================================================
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,33 +23,38 @@ export default async function handler(req, res) {
     }
   }
 
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
+
+  // Header yang support BOTH format key lama (eyJ...) dan baru (sb_publishable_...)
+  const headers = {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Prefer': 'return=representation'
+  };
+
   try {
-    // Generate nomor pendaftaran: PSB-2025-XXXX
     const tahun = new Date().getFullYear();
 
     // Hitung jumlah pendaftaran tahun ini
     const countResp = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/pendaftaran?select=id&tanggal_daftar=gte.${tahun}-01-01`,
-      {
-        headers: {
-          'apikey': process.env.SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
-        }
-      }
+      `${SUPABASE_URL}/rest/v1/pendaftaran?select=id&tanggal_daftar=gte.${tahun}-01-01`,
+      { headers }
     );
-    const countData = await countResp.json();
-    const urutan = (countData.length || 0) + 1;
+
+    let urutan = 1;
+    if (countResp.ok) {
+      const countData = await countResp.json();
+      urutan = (Array.isArray(countData) ? countData.length : 0) + 1;
+    }
+
     const nomor_pendaftaran = `PSB-${tahun}-${String(urutan).padStart(4, '0')}`;
 
     // Simpan ke Supabase
-    const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/pendaftaran`, {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/pendaftaran`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': process.env.SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-        'Prefer': 'return=representation'
-      },
+      headers,
       body: JSON.stringify({
         nomor_pendaftaran,
         nama_lengkap: nama_lengkap.trim(),
@@ -67,9 +70,14 @@ export default async function handler(req, res) {
       })
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const err = await response.text();
-      throw new Error(err);
+      console.error('Supabase error:', response.status, responseText);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Gagal menyimpan ke database: ' + responseText 
+      });
     }
 
     return res.status(200).json({
@@ -80,6 +88,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Error simpan pendaftaran:', error);
-    return res.status(500).json({ success: false, message: 'Gagal menyimpan data. Silakan coba lagi.' });
+    return res.status(500).json({ success: false, message: 'Gagal menyimpan data: ' + error.message });
   }
 }
